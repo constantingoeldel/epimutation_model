@@ -1,0 +1,9 @@
+clickhouse-connect
+torch
+numpy
+polars
+maturin
+jupyter
+ipykernel
+pyarrow
+connectorx
