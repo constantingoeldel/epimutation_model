@@ -5,8 +5,8 @@ import time
 
 import torch
 
-max_sites_per_gene = 256
-max_chr_states_per_gene = 1024  # including gene itself
+max_sites_per_gene = 512
+max_chr_states_per_gene = 512  # including gene itself
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -52,26 +52,22 @@ class Sites(torch.utils.data.IterableDataset):
             )
             num_sites = len(sites_line_2)
             num_generations = 7
-            sites_line_2 = pl.DataFrame(sites_line_2)
+            sites_line_2 = pl.DataFrame(sites_line_2)["meth_lvl"].to_numpy()
             # sites_line_8 = self.client.query_arrow(f"select location - {gene['start']} as start_diff, {gene['end']} -location as end_diff, location * 1.0 / ({gene_length}) as percentile, meth_lvl from methylome_within_gbM where chromosome = {gene['chromosome']} and (line = 8 or line = 0)  and strand = {gene['strand']} and location between {gene['start']} and {gene['end']} order by generation, line, start_diff")
             # sites_line_8 = pl.DataFrame(sites_line_8)
 
-            targets_line_2 = sites_line_2["meth_lvl"].to_numpy()
             # targets_line_8 = sites_line_8['meth_lvl'].to_numpy()
 
-            targets_line_2 = torch.tensor(targets_line_2, dtype=torch.float32).reshape(
-                num_sites // num_generations, num_generations
-            )
             # targets_line_8 = torch.tensor(targets_line_8, dtype=torch.float32)
 
             # targets_line_8 = targets_line_8.reshape(gene_length, 6)
 
             # remove first row, these can not be predicted as there is no predecessor
-            targets_line_2 = targets_line_2[1:, :]
             # targets_line_8 = targets_line_8[1:, :]
-            sites_line_2 = torch.tensor(
-                sites_line_2.to_numpy(), dtype=torch.float32
-            ).reshape(num_sites // num_generations * 4, num_generations)
+            sites_line_2 = torch.tensor(sites_line_2, dtype=torch.float32).reshape(
+                num_sites // num_generations, num_generations
+            )
+            targets_line_2 = sites_line_2[1:, :]
             # sites_line_8 = torch.tensor(sites_line_8.to_numpy(), dtype=torch.float32).reshape(gene_length, 6)
 
             # remove the last row, these have no predecessor, so no known target
@@ -110,13 +106,13 @@ class Sites(torch.utils.data.IterableDataset):
             # print(targets_line_8.shape)
             print(chr_states.shape)
 
-            x = torch.zeros(max_sites_per_gene * 4, num_generations)
+            x = torch.zeros(max_sites_per_gene, num_generations)
             t = torch.zeros(max_sites_per_gene, num_generations)
-            c = torch.zeros(max_chr_states_per_gene)
+            c = torch.zeros(max_chr_states_per_gene, num_generations)
 
             x[: sites_line_2.shape[0], :] = sites_line_2
             t[: targets_line_2.shape[0], :] = targets_line_2
-            c[: chr_states.shape[0]] = chr_states
+            c[: chr_states.shape[0]] = chr_states.repeat(num_generations, 1).T
 
             print(x.shape, t.shape, c.shape)
 
@@ -143,9 +139,9 @@ class MethylationMaster(nn.Module):
         super().__init__()
 
         self.transformer = nn.Transformer(
-            d_model=1024,
-            nhead=16,
-            dim_feedforward=4096,
+            d_model=max_sites_per_gene,
+            nhead=8,
+            dim_feedforward=max_sites_per_gene * 4,
             dtype=torch.float32,
         )
 
