@@ -7,6 +7,7 @@ import torch
 
 max_sites_per_gene = 512
 max_chr_states_per_gene = 512  # including gene itself
+num_genes = 18972
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -100,11 +101,11 @@ class Sites(torch.utils.data.IterableDataset):
                 chr_states_and_gene.to_numpy(), dtype=torch.float32
             ).flatten()
 
-            print(sites_line_2.shape)
+            # print(sites_line_2.shape)
             # print(sites_line_8.shape)
-            print(targets_line_2.shape)
+            # print(targets_line_2.shape)
             # print(targets_line_8.shape)
-            print(chr_states.shape)
+            # print(chr_states.shape)
 
             x = torch.zeros(max_sites_per_gene, num_generations)
             t = torch.zeros(max_sites_per_gene, num_generations)
@@ -114,7 +115,7 @@ class Sites(torch.utils.data.IterableDataset):
             t[: targets_line_2.shape[0], :] = targets_line_2
             c[: chr_states.shape[0]] = chr_states.repeat(num_generations, 1).T
 
-            print(x.shape, t.shape, c.shape)
+            # print(x.shape, t.shape, c.shape)
 
             # every last node -> list back to root: decoder
             # surrounding methylome -> encoder
@@ -124,9 +125,9 @@ class Sites(torch.utils.data.IterableDataset):
             t = t.to(device)
 
             toc = time.perf_counter()
-            print(
-                f"Gene {gene['chromosome']}:{gene['start']}:{gene['end']} in {toc - tic:0.4f} seconds"
-            )
+            # print(
+            #     f"Gene {gene['chromosome']}:{gene['start']}:{gene['end']} in {toc - tic:0.4f} seconds"
+            # )
             yield x, c, t
 
 
@@ -139,15 +140,15 @@ class MethylationMaster(nn.Module):
         super().__init__()
 
         self.transformer = nn.Transformer(
-            d_model=max_sites_per_gene,
-            nhead=8,
-            dim_feedforward=max_sites_per_gene * 4,
+            d_model=7,
+            nhead=1,
+            dim_feedforward=7 * 4,
             dtype=torch.float32,
+            batch_first=True,
         )
 
     def forward(self, x, c, targets=None):
         logits = self.transformer(c, x)
-        print(logits.shape)  # Should be (gene_length * 6)
 
         if targets is None:
             return logits, None
@@ -166,16 +167,16 @@ print(sum(p.numel() for p in conschti.parameters()) / 1e6, "M parameters")
 optimizer = torch.optim.Adam(conschti.parameters(), lr=1e-3)
 
 
-trainings_steps = 1000
+trainings_steps = 100000
 
 for i in range(trainings_steps):
     optimizer.zero_grad()
 
     x, c, t = next(iter(train_dataloader))
-    print(x.shape, c.shape, t.shape)
 
     logits, loss = conschti(x, c, t)
     loss.backward()
     optimizer.step()
 
-    print(f"Step {i}, loss: {loss.item()}")
+    if i % 50 == 0:
+        print(f"Step {i}, loss: {loss.item():.4f}")
