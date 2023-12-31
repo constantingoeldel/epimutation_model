@@ -115,14 +115,17 @@ class Sites(torch.utils.data.IterableDataset):
             t[: targets_line_2.shape[0], :] = targets_line_2
             c[: chr_states.shape[0]] = chr_states.repeat(num_generations, 1).T
 
+            # x = torch.unsqueeze(x.T, 0)
+            # t = torch.unsqueeze(t.T, 0)
+            # c = torch.unsqueeze(c.T, 0)
             # print(x.shape, t.shape, c.shape)
 
             # every last node -> list back to root: decoder
             # surrounding methylome -> encoder
             # surrounding gene + chromatine state -> encoder
-            x = x.to(device)
-            c = c.to(device)
-            t = t.to(device)
+            x = x.T.to(device)
+            c = c.T.to(device)
+            t = t.T.to(device)
 
             toc = time.perf_counter()
             # print(
@@ -140,18 +143,26 @@ class MethylationMaster(nn.Module):
         super().__init__()
 
         self.transformer = nn.Transformer(
-            d_model=7,
+            d_model=512,
             nhead=1,
-            dim_feedforward=7 * 4,
+            dim_feedforward=512 * 4,
             dtype=torch.float32,
-            batch_first=True,
+            # batch_first=True,
         )
 
     def forward(self, x, c, targets=None):
-        logits = self.transformer(c, x)
+        logits = self.transformer(
+            c,
+            x,
+            tgt_is_causal=True,
+            tgt_mask=nn.Transformer.generate_square_subsequent_mask(x.shape[1]).to(
+                device
+            ),
+        )
 
         if targets is None:
             return logits, None
+        # print(logits, targets)
         loss = F.mse_loss(logits, targets)
 
         return logits, loss
@@ -160,16 +171,33 @@ class MethylationMaster(nn.Module):
 from torch.utils.data import DataLoader
 
 training_data = Sites(mode="train")
+test_data = Sites(mode="test")
 train_dataloader = DataLoader(training_data, batch_size=None)
+test_dataloader = DataLoader(test_data, batch_size=None)
 conschti = MethylationMaster().to(device)
 
 print(sum(p.numel() for p in conschti.parameters()) / 1e6, "M parameters")
 optimizer = torch.optim.Adam(conschti.parameters(), lr=1e-3)
 
 
-trainings_steps = 100000
+genes_per_chrom = {
+    1: 4952,
+    2: 3003,
+    3: 3721,
+    4: 2864,
+    5: 4432,
+}
 
-for i in range(trainings_steps):
+training_genes = sum(genes_per_chrom.values()) - genes_per_chrom[5]
+test_genes = genes_per_chrom[5]
+
+run_name = "batched_by_generation_causal"
+with open(f"log/{run_name}.txt", "w") as f:
+    # reset log file
+    f.write("step,time,loss,test_loss\n")
+
+tic = time.perf_counter()
+for i in range(training_genes):
     optimizer.zero_grad()
 
     x, c, t = next(iter(train_dataloader))
@@ -178,5 +206,10 @@ for i in range(trainings_steps):
     loss.backward()
     optimizer.step()
 
-    if i % 50 == 0:
-        print(f"Step {i}, loss: {loss.item():.4f}")
+    if i % training_genes // test_genes == 0:
+        x, c, t = next(iter(test_dataloader))
+        logits, test_loss = conschti(x, c, t)
+        toc = time.perf_counter()
+        # write step, timing, loss to file log.txt
+        with open(f"log/{run_name}.txt", "a") as f:
+            f.write(f"{i},{toc - tic:0.4f},{loss},{test_loss}\n")

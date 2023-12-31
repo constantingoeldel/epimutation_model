@@ -1,5 +1,6 @@
 .env/
 
 # Added by cargo
-
+/slices
 /target
+/embeddings
