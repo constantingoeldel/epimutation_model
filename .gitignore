@@ -4,3 +4,6 @@
 /slices
 /target
 /embeddings
+/labels
+/log
+*parquet
